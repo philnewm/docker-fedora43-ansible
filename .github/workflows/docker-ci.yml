@@ -1,0 +1,115 @@
+---
+
+name: Docker CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "25 2 * * 1"
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build image
+        run: docker build -t docker-ansible .
+
+      - name: Save image
+        run: docker save docker-ansible | gzip > image.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: docker-image
+          path: image.tar.gz
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: docker-image
+
+      - name: Load image
+        run: docker load < image.tar.gz
+
+      - name: Run the built image
+        run: >-
+          docker run --name test-container -d --privileged
+          -v /sys/fs/cgroup:/sys/fs/cgroup:rw --cgroupns=host
+          docker-ansible
+
+      - name: Verify LANG environment
+        run: >-
+          docker exec test-container
+          bash -c '[ "$LANG" = "en_US.UTF-8" ]'
+
+      - name: Verify locale.conf
+        run: >-
+          docker exec test-container
+          bash -c 'grep -qx "LANG=en_US.UTF-8" /etc/locale.conf'
+
+      - name: Verify UTF-8 locale exists
+        run: >-
+          docker exec test-container
+          bash -c 'locale -a | grep -qi "en_US"'
+
+      - name: Verify active locale
+        run: >-
+          docker exec test-container
+          bash -c 'locale | grep -q "^LANG=en_US.UTF-8$"'
+
+      - name: Verify systemd is running in the built image
+        run: docker exec test-container bash -c 'ps -p 1 -o comm= | grep -qx systemd'
+
+      - name: Verify permissions for shadow file
+        run: docker exec test-container bash -c '[ "$(stat -c "%a" /etc/shadow)" = "640" ]'
+
+      - name: Verify ansible user exists
+        run: docker exec test-container bash -c 'id ansible >/dev/null 2>&1'
+
+      - name: Verify passwordless sudo for user ansible
+        run: docker exec test-container bash -c 'su - ansible -c "sudo true"'
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract repo tag
+        id: image_tag
+        run: echo "image_tag=${GITHUB_REPOSITORY#*-}" >> $GITHUB_OUTPUT
+
+      - name: Build and push image.
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: docker.io/${{ github.actor }}/${{ steps.image_tag.outputs.image_tag }}:latest
+
+...
