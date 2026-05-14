@@ -25,6 +25,7 @@ RUN dnf makecache \
     && dnf -y install \
         uv \
         sudo \
+        util-linux \
         procps-ng \
         which \
         python3-rpm \
