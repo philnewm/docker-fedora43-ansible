@@ -25,6 +25,7 @@ RUN dnf makecache \
     && dnf -y install \
         uv \
         sudo \
+        procps-ng \
         which \
         python3-rpm \
         python3-libdnf5 \
@@ -39,13 +40,16 @@ ENV LC_ALL=en_US.UTF-8
 
 RUN uv pip install $pip_packages --system
 
-
 # Disable requiretty.
 RUN sed -i -e 's/^\(Defaults\s*requiretty\)/#--- \1/'  /etc/sudoers
 
-# Install Ansible inventory file.
-RUN mkdir -p /etc/ansible
-RUN echo -e '[local]\nlocalhost ansible_connection=local' > /etc/ansible/hosts
+# Setup ansible user
+RUN set -eux; \
+    group=$(if command -v yum >/dev/null 2>&1; then echo wheel; else echo sudo; fi); \
+    useradd -m -s /bin/bash ansible; \
+    usermod -aG "$group" ansible; \
+    echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible; \
+    chmod 0644 /etc/sudoers.d/ansible
 
 VOLUME ["/sys/fs/cgroup", "/tmp", "/run"]
 CMD ["/usr/sbin/init"]
