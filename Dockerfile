@@ -43,6 +43,10 @@ RUN uv pip install $pip_packages --system
 # Disable requiretty.
 RUN sed -i -e 's/^\(Defaults\s*requiretty\)/#--- \1/'  /etc/sudoers
 
+# Fix shadow file permissions
+# Note https://github.com/rocky-linux/sig-cloud-instance-images/issues/56
+RUN chmod 0640 /etc/shadow
+
 # Setup ansible user
 RUN set -eux; \
     group=$(if command -v yum >/dev/null 2>&1; then echo wheel; else echo sudo; fi); \
